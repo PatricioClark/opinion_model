@@ -11,7 +11,7 @@ def opinion_model(model, coords, params):
     # Calculate F(t_0, x)
     dx = params[0]
     Yp = model(coords)[0]
-    fx = tf.cumsum(Yp)
+    fx = tf.cumsum(Yp[:,0])
     fx = tf.constant(fx)*dx
 
     with tf.GradientTape(persistent=True) as tape:

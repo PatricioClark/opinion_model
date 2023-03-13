@@ -7,7 +7,6 @@ tf.keras.backend.set_floatx('float32')
 from pinn      import PhysicsInformedNN
 from equations import opinion_model
 
-from   mod import *
 import numpy as np
 
 lr = keras.optimizers.schedules.ExponentialDecay(1e-3, 1000, 0.9)
