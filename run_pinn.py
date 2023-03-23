@@ -13,7 +13,7 @@ import numpy as np
 lr = keras.optimizers.schedules.ExponentialDecay(1e-3, 1000, 0.9)
 layers  = [2] + 2*[64] + [1]
 PINN = PhysicsInformedNN(layers,
-                         dest='./odir/',
+                         dest='./', #saque el /odir porque no hacia falta 
                          activation='elu',
                          optimizer=keras.optimizers.Adam(lr),
                          restore=False)
@@ -29,28 +29,36 @@ def u(x):
 
 
 Lx = 2
-Nx = 20
-Nt = 50
+Nx = 100
+Nt = 500
+
 t = np.linspace(0,100,Nt)
-X = np.array(2*np.random.rand(Nt,Nx+1) - 1)
-for i in range(len(t)):
-  X[i][0] = t[i]
+times = np.repeat(t,Nx)
+arr = np.array(np.array_split(times,len(times))).flatten()
+arr = np.insert(arr,np.arange(1,Nx*Nt+1),(2*np.random.rand(1,Nx*Nt) - 1).flatten())
+X = np.array(np.split(arr,Nt*Nx)).reshape(Nx*Nt,2)
+X = X
+
+#X = np.array(2*np.random.rand(Nt,Nx+1) - 1)
+#for i in range(len(t)):
+#  X[i][0] = t[i]
 
 Y =np.array([u(x) for x in X]) #[u(t_0,x_0),u(t_1,x_1),...]
-lambda_data = np.zeros(Nx) #[1,0,0,..]
+Y = Y
+lambda_data = np.zeros(Nt) #[1,0,0,..]
 lambda_data[0] = 1
-lambda_phys = np.ones(Nx)
+lambda_phys = np.ones(Nt)
 lambda_phys[0] = 0 #[0,1,1,..]
-flags = np.arange(Nx) 
+flags = np.arange(Nt) 
 
 alpha   = 0.0
-tot_eps = 100
+tot_eps = 10
 eq_params = [Lx/Nx]
-eq_params = [np.float32(p) for p in eq_params]
+eq_params = [np.float32(p) for p in eq_params] #eq_params es el diferencial de x que paso para calcular la integral
 PINN.train(X, Y, opinion_model,
            epochs=tot_eps,
            eq_params=eq_params,
-           batch_size=Nt,
+           batch_size=Nt*Nx,
            lambda_data=lambda_data,   # Punto donde se enfuerza L_bc
            lambda_phys=lambda_phys,   # Punto donde se enfuerza L_pde
            flags=flags,               # Separa el dataset a cada t

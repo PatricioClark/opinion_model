@@ -441,8 +441,8 @@ class PhysicsInformedNN:
                                           batch_size,
                                           flag_idxs,
                                           random=rnd_order_training)
-                x_batch = tf.convert_to_tensor(x_batch)
-                y_batch = tf.convert_to_tensor(y_batch)
+                x_batch = tf.convert_to_tensor(x_batch, dtype='float32') #Agregue el type floay 32 para resolver error de formato
+                y_batch = tf.convert_to_tensor(y_batch, dtype='float32')
                 l_data  = tf.constant(l_data, dtype='float32')
                 l_phys  = tf.constant(l_phys, dtype='float32')
                 ba_counter  = tf.constant(ba)
@@ -501,7 +501,7 @@ class PhysicsInformedNN:
                    if data_mask[ii]]
             loss_data = tf.add_n(aux)
 
-            # Physics part
+            # Physics partx            
             equations = pde(self.model, x_batch, eq_params)
             loss_eqs  = [tf.reduce_mean(
                          lambda_phys*tf.square(eq))

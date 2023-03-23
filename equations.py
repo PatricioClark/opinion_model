@@ -10,9 +10,9 @@ def opinion_model(model, coords, params):
 
     # Calculate F(t_0, x)
     dx = params[0]
-    Yp = model(coords)[0]
-    fx = tf.cumsum(Yp)
-    fx = tf.constant(fx)*dx
+    Yp = model(coords)[0]            
+    fx = tf.cumsum(Yp)        
+    fx = fx*dx #Saque el tf.constante(fx) para solucionar el error TypeError: Expected any non-tensor type, got a tensor instead
 
     with tf.GradientTape(persistent=True) as tape:
         tape.watch(coords)
