@@ -1,1 +1,0 @@
-# PINN for opinion models
