@@ -39,10 +39,6 @@ arr = np.insert(arr,np.arange(1,Nx*Nt+1),(2*np.random.rand(1,Nx*Nt) - 1).flatten
 X = np.array(np.split(arr,Nt*Nx)).reshape(Nx*Nt,2)
 X = X
 
-#X = np.array(2*np.random.rand(Nt,Nx+1) - 1)
-#for i in range(len(t)):
-#  X[i][0] = t[i]
-
 Y =np.array([u(x) for x in X]) #[u(t_0,x_0),u(t_1,x_1),...]
 Y = Y
 lambda_data = np.zeros(Nt) #[1,0,0,..]
