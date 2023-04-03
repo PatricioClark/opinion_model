@@ -27,6 +27,34 @@ Nx = 1000
 # lambda_phys = [0, 1, 1, ...]
 # flags = [0, 1, 2, ...]
 
+# Add validation function
+def cte_validation(self, X, Nt, Nx, u):
+    # Definimos una función que el código después llama
+    # El único parametro que le pasa código es el número de epoch
+    # El resto lo definimos al generar la función
+    def validation(ep):
+        # Get prediction
+        Y  = self.model(X)[0].numpy()
+
+        u_p = Y[:,0].reshape((Nt,Nx))
+
+        # True valu
+        u_t  = u(X)
+
+        # Error global
+        err  = np.sqrt(np.mean((u_p-u_t)**2))/np.std(u_t)
+
+        # Loss functions
+        output_file = open(self.dest + 'validation.dat', 'a')
+        print(ep, *err,
+              file=output_file)
+        output_file.close()
+
+    return validation
+
+# Se la agregamos a la clase
+PINN.validation = cte_validation(PINN, X, Nt, Nx, u)
+
 alpha   = 0.0
 tot_eps = 4000
 eq_params = [Lx/Nx]
@@ -41,4 +69,5 @@ PINN.train(X, Y, opinion_model,
            rnd_order_training=False,  # No arma batches al hacer
            alpha=alpha,
            verbose=False,
+           valid_freq=10,             # Cada cuantas epochs usa la funcion validation
            timer=False)
