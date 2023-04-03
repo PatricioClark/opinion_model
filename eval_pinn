@@ -18,7 +18,6 @@ PINN = PhysicsInformedNN(layers,
                          activation='elu',
                          optimizer=keras.optimizers.Adam(lr),
                          restore=True)
-PINN.model.summary()
 
 
 def u(X):
@@ -53,29 +52,18 @@ tot_eps = 300
 eq_params = [Lx/Nx]
 eq_params = [np.float32(p) for p in eq_params] #eq_params es el diferencial de x que paso para calcular la integral
 
-PINN.train(X, Y, opinion_model,
-           epochs=tot_eps,
-           eq_params=eq_params,
-           batch_size=Nt,
-           lambda_data=lambda_data,   # Punto donde se enfuerza L_bc
-           lambda_phys=lambda_phys,   # Punto donde se enfuerza L_pde
-           flags=flags,               # Separa el dataset a cada t
-           rnd_order_training=False,  # No arma batches al hacer
-           alpha=alpha,
-           verbose=True,
-           timer=False)
-
-
 
 fields = (PINN.model(X)[0]).numpy()
 
 
-fig = plt.figure(figsize = (10,10))
-plt.title('Model')
-ax = plt.axes(projection='3d')
-ax.scatter3D(X[:Nx,0].flatten(), X[:Nx,1].flatten(), fields[:Nx])
+#fig = plt.figure(figsize = (10,10))
+#plt.title('Model')
+#ax = plt.axes(projection='3d')
+#ax.scatter3D(X[:Nx,0].flatten(), X[:Nx,1].flatten(), fields[:Nx])
 #ax.view_init(10,90)
+#plt.show()
+
+#fig = plt.figure(figsize = (10,10))
+plt.plot(X[:Nx,1],fields[:Nx])
+plt.plot(X[:Nx,1],u(X[:Nx]))
 plt.show()
-
-
-
