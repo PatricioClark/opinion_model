@@ -326,6 +326,7 @@ class PhysicsInformedNN:
               eq_params=None,
               lambda_data=1.0,
               lambda_phys=1.0,
+              lambda_bc=1.0,
               alpha=0.0,
               flags=None,
               rnd_order_training=True,
@@ -367,6 +368,8 @@ class PhysicsInformedNN:
             Weight of the physics part of the loss function. If it is an, array
             it should be the same length as X_data, each entry will correspond
             to the particular lambda_phys of the corresponding data point.
+        lambda_bc : float or array [optional]
+            Weight to impose border conditions. 
         alpha : float [optional]
             If non-zero, performs adaptive balance of the physics and data part
             of the loss functions. See comment above for reference. Default is
@@ -489,9 +492,11 @@ class PhysicsInformedNN:
 
     @tf.function
     def _training_step(self, x_batch, y_batch,
-                      pde, eq_params, lambda_data, lambda_phys,
+                      pde, eq_params, lambda_data, lambda_phys, lambda_bc,
                       data_mask, bal_phys, alpha, ba):
-        with tf.GradientTape(persistent=True) as tape:
+                
+        with tf.GradientTape(persistent=True) as tape:            
+
             # Data part
             output = self.model(x_batch, training=True)
             y_pred = output[0]
@@ -499,33 +504,49 @@ class PhysicsInformedNN:
                    lambda_data*tf.square(y_batch[:,ii]-y_pred[:,ii]))
                    for ii in range(self.dout)
                    if data_mask[ii]]
-            loss_data = tf.add_n(aux)
+            loss_data = tf.add_n(aux)        
 
-            # Physics partx            
+            # Physics part      
             equations = pde(self.model, x_batch, eq_params)
             loss_eqs  = [tf.reduce_mean(
                          lambda_phys*tf.square(eq))
                          for eq in equations]
             loss_phys = tf.add_n(loss_eqs)
             equations = tf.convert_to_tensor(equations)
+            
+            #Border part
+            aux_bc = [tf.reduce_mean(
+                   lambda_bc*tf.square(y_batch[:,ii]-y_pred[:,ii]))
+                   for ii in range(self.dout)
+                   if data_mask[ii]]
+            loss_bc = tf.add_n(aux_bc)
 
-        # Calculate gradients of data part
+
+            # Calculate gradients of data part
         gradients_data = tape.gradient(loss_data,
                     self.model.trainable_variables,
                     unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
-        # Calculate gradients of physics part
+            # Calculate gradients of physics part
         gradients_phys = tape.gradient(loss_phys,
                     self.model.trainable_variables,
                     unconnected_gradients=tf.UnconnectedGradients.ZERO)
-
+            
+            # Calculate gradients of border part
+        gradients_bc = tape.gradient(loss_bc,
+                    self.model.trainable_variables,
+                    unconnected_gradients=tf.UnconnectedGradients.ZERO)
+        
         # Delete tape
         del tape
 
+                
         # alpha-based dynamic balance
         if alpha > 0.0:
             mean_grad_data = get_mean_grad(gradients_data, self.num_trainable_vars)
             mean_grad_phys = get_mean_grad(gradients_phys, self.num_trainable_vars)
+            mean_grad_bc = get_mean_grad(gradients_bc, self.num_trainable_vars)
+            
             lhat = mean_grad_data/mean_grad_phys
             bal_phys = (1.0-alpha)*bal_phys + alpha*lhat
 
