@@ -1,8 +1,6 @@
 """Implementation of Physics-Informed Neural Networks (PINNs)
-
 Original references:
     - Raissi et al
-
 2022 Patricio Clark Di Leoni
      Departamento de Ingeniería
      Universidad de San Andrés
@@ -19,29 +17,23 @@ tf.keras.backend.set_floatx('float32')
 
 class PhysicsInformedNN:
     """General PINN class
-
     Dimensional and problem agnostic implementatation of a Physics Informed
     Neural Netowrk (PINN), geared towards solving inverse problems.
     Dimensionality is set by specifying the dimensions of the inputs and the
     outputs. The Physics is set by supplying the partial differential equations
     of the problem.
-
     The instantiated model is stored in self.model and it takes coords as inputs
     and outputs a list where the first contains the learned fields and the rest
     of the entries contains the different learned parameters when running an
     inverse PINN or a dummy output that should be disregarded when not.
-
     Training can be done using the dynamic balance methods described in
     "Understanding and mitigating gradient pathologies in physics-informed
     neural networks" by Wang, Teng & Perdikaris (2020) (alpha option in
     training).
-
     A few definitions before proceeding to the initialization parameters:
     
     din   = input dims
     dout  = output dims
-
-
     Args:
         layers : list
             Shape of the NN. The first element must be din, and the last one
@@ -220,6 +212,7 @@ class PhysicsInformedNN:
         # Output definition
         fields = keras.layers.Dense(dout,
                                     kernel_initializer=act_dict['kinit'],
+                                    activation='relu',
                                     name=out_name)(hidden)
 
         return fields
@@ -269,14 +262,11 @@ class PhysicsInformedNN:
     def _generate_inverse(self, coords):
         """
         Generate networks for inverse problem
-
         This function returns a list whose entries are either False if the
         parameter is fixed, or a neural network that ouputs the parameter to be
         learned.
-
         Parameters
         ----------
-
         coords : keras Input layer
             The input layer of the PINN.
         """
@@ -338,12 +328,9 @@ class PhysicsInformedNN:
               data_mask=None):
         """
         Train function
-
         Loss functions are written to output.dat
-
         Parameters
         ----------
-
         x_data : ndarray
             Coordinates where the data constraint is going to be enforced.
             Must have shape (:, din).
@@ -412,6 +399,7 @@ class PhysicsInformedNN:
         if not np.shape(lambda_data):
             lambda_data = np.array([lambda_data for _ in range(len_data)])
             lambda_phys = np.array([lambda_phys for _ in range(len_data)])
+            lambda_bc = np.array([lambda_bc for _ in range(len_data)])
 
         # Expand flags
         if flags is None:
@@ -436,10 +424,12 @@ class PhysicsInformedNN:
                 (x_batch,
                  y_batch,
                  l_data,
-                 l_phys) = get_mini_batch(x_data,
+                 l_phys,
+                 l_bc) = get_mini_batch(x_data,
                                           y_data,
                                           lambda_data,
                                           lambda_phys,
+                                          lambda_bc,
                                           ba,
                                           batch_size,
                                           flag_idxs,
@@ -448,19 +438,22 @@ class PhysicsInformedNN:
                 y_batch = tf.convert_to_tensor(y_batch, dtype='float32')
                 l_data  = tf.constant(l_data, dtype='float32')
                 l_phys  = tf.constant(l_phys, dtype='float32')
+                l_bc  = tf.constant(l_bc, dtype='float32')
                 ba_counter  = tf.constant(ba)
 
                 if timer:
                     t0 = time.time()
                 (loss_data,
                  loss_phys,
+                 loss_bc,                 
                  inv_outputs,
                  bal_phys) = self._training_step(x_batch,
                                                  y_batch,
                                                  pde,
                                                  eq_params,
                                                  l_data,
-                                                 l_phys,
+                                                 l_phys,    
+                                                 l_bc,                                             
                                                  data_mask,
                                                  bal_phys,
                                                  alpha,
@@ -476,6 +469,7 @@ class PhysicsInformedNN:
                 self._print_status(ep,
                                   loss_data,
                                   loss_phys,
+                                  loss_bc,
                                   inv_outputs,
                                   alpha,
                                   verbose=verbose)
@@ -496,10 +490,17 @@ class PhysicsInformedNN:
                       data_mask, bal_phys, alpha, ba):
                 
         with tf.GradientTape(persistent=True) as tape:            
-
             # Data part
             output = self.model(x_batch, training=True)
-            y_pred = output[0]
+            y_pred = output[0]            
+            
+            with tf.GradientTape() as tape1:                                
+                tape1.watch(x_batch)
+                ybc = self.model(x_batch)                
+                
+            y_pred_x  = tape1.gradient(ybc, x_batch,unconnected_gradients=tf.UnconnectedGradients.ZERO)    
+             
+            #Initial condition
             aux = [tf.reduce_mean(
                    lambda_data*tf.square(y_batch[:,ii]-y_pred[:,ii]))
                    for ii in range(self.dout)
@@ -507,20 +508,21 @@ class PhysicsInformedNN:
             loss_data = tf.add_n(aux)        
 
             # Physics part      
-            equations = pde(self.model, x_batch, eq_params)
+            equations = pde(self.model, x_batch, eq_params)            
             loss_eqs  = [tf.reduce_mean(
                          lambda_phys*tf.square(eq))
-                         for eq in equations]
-            loss_phys = tf.add_n(loss_eqs)
+                         for eq in equations]            
+            loss_phys = tf.add_n(loss_eqs)            
             equations = tf.convert_to_tensor(equations)
-            
+                        
             #Border part
             aux_bc = [tf.reduce_mean(
-                   lambda_bc*tf.square(y_batch[:,ii]-y_pred[:,ii]))
+                   lambda_bc*tf.square(y_pred_x[:,ii]))
                    for ii in range(self.dout)
                    if data_mask[ii]]
             loss_bc = tf.add_n(aux_bc)
 
+            
 
             # Calculate gradients of data part
         gradients_data = tape.gradient(loss_data,
@@ -537,15 +539,15 @@ class PhysicsInformedNN:
                     self.model.trainable_variables,
                     unconnected_gradients=tf.UnconnectedGradients.ZERO)
         
+        gradients_phys = [g_phys + g_bc for g_phys, g_bc in zip(gradients_phys,gradients_bc)]
+        
         # Delete tape
         del tape
-
                 
         # alpha-based dynamic balance
         if alpha > 0.0:
             mean_grad_data = get_mean_grad(gradients_data, self.num_trainable_vars)
-            mean_grad_phys = get_mean_grad(gradients_phys, self.num_trainable_vars)
-            mean_grad_bc = get_mean_grad(gradients_bc, self.num_trainable_vars)
+            mean_grad_phys = get_mean_grad(gradients_phys, self.num_trainable_vars)            
             
             lhat = mean_grad_data/mean_grad_phys
             bal_phys = (1.0-alpha)*bal_phys + alpha*lhat
@@ -565,20 +567,21 @@ class PhysicsInformedNN:
 
         return (loss_data,
                 loss_phys,
+                loss_bc,
                 inv_ctes,
                 bal_phys)
 
-    def _print_status(self, ep, lu, lf,
+    def _print_status(self, ep, lu, lf,lbc,
                      inv_ctes, alpha, verbose=False):
         """ Print status function """
 
         # Loss functions
         output_file = open(self.dest + 'output.dat', 'a')
-        print(ep, f'{lu}', f'{lf}',
+        print(ep, f'{lu}', f'{lf}',f'{lbc}',
               file=output_file)
         output_file.close()
         if verbose:
-            print(ep, f'{lu}', f'{lf}')
+            print(ep, f'{lu}', f'{lf}',f'{lbc}')
 
         # Inverse coefficients
         if self.inverse and len(inv_ctes) > 0:
@@ -612,10 +615,10 @@ def get_tr_k(grads):
     total_sum       = tf.add_n(sum_over_layers)
     return total_sum
 
-def get_mini_batch(X, Y, ld, lf, ba, batch_size, flag_idxs, random=True):
+def get_mini_batch(X, Y, ld, lf, lbc, ba, batch_size, flag_idxs, random=True):
     ''' New separted version for this problem '''
     idxs = flag_idxs[ba]
-    return X[idxs], Y[idxs], ld[idxs], lf[idxs]
+    return X[idxs], Y[idxs], ld[idxs], lf[idxs], lbc[idxs]
 
 class AdaptiveAct(keras.layers.Layer):
     """ Adaptive activation function """

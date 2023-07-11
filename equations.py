@@ -11,8 +11,9 @@ def opinion_model(model, coords, params):
     dx = params[0]
     lam = params[1]
     Yp = model(coords)[0]            
-    fx = tf.cumsum(Yp)        
+    fx = tf.cumsum(Yp)            
     fx = fx*dx 
+    Ix = tf.ones_like(Yp)*(fx[-1])    
     
     with tf.GradientTape(persistent=True) as tape2:
         tape2.watch(coords)
@@ -25,7 +26,7 @@ def opinion_model(model, coords, params):
         #LHS
         grad_u  = tape1.gradient(u, coords)
         u_t = grad_u[:,0]
-        u_x = grad_u[:,1]
+        #u_x = grad_u[:,1]
 
         #RHS
         grad_uf = tape1.gradient(uf, coords)
@@ -33,9 +34,13 @@ def opinion_model(model, coords, params):
 
         del tape1
 
-    u_xx = tape2.gradient(u_x, coords)[:,1]
+    #u_xx = tape2.gradient(u_x, coords)[:,1]
     
     del tape2
 
-    f = u_t - uf_x - (lam) * u_xx
-    return [f]
+    f = u_t - uf_x 
+
+    #- (lam) * u_xx    
+
+    return [f,tf.reshape(Ix,f.shape) - 1]
+
