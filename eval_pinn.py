@@ -95,16 +95,27 @@ def convolution(X):
     conv = np.convolve(u_eval,gauss,mode='same')  
     sol[i*Nx:(i+1)*Nx] = ((conv/np.max(conv))*np.max(u_eval)).reshape((len(u_eval),1))            
   return sol
+def dif_fin(x):   
+   dx = (x[:,1][1] - x[:,1][0])
+   u = convolution(x).reshape(len(x[:,1]))
+   u[1] = u[0]
+   u[-2] = u[-1]
+   f = np.cumsum(u)*dx
+   F = u*(2*f - 1)      
+   return np.gradient(F, dx).reshape(len(x[:,1]),1)
 def Euler(condicion_inicial,tiempo_final,n_pasos_temporales,espacio):
     h = tiempo_final/n_pasos_temporales
     tiempo = 0
     solucion = condicion_inicial
-    for j in range(n_pasos_temporales):
+    m = 0
+    while m < n_pasos_temporales:    
         tiempo += h
         x = np.array([(tiempo,tt) for tt in espacio])
-        F = convolution(x)
+        F = dif_fin(x)        
         solucion += h*F
+        m += 1
     return solucion
+
 
 Lx = 2 
 Nx = 100
