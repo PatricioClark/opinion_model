@@ -540,7 +540,7 @@ class PhysicsInformedNN:
                     self.model.trainable_variables,
                     unconnected_gradients=tf.UnconnectedGradients.ZERO)
             
-            
+
             # Calculate gradients of border part
         gradients_bc = tape.gradient(loss_bc,
                     self.model.trainable_variables,
