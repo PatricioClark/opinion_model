@@ -11,6 +11,7 @@ import numpy as np
 import tensorflow as tf
 from   tensorflow import keras
 import time
+import scipy
 
 tf.keras.backend.set_floatx('float32')
 
@@ -76,7 +77,7 @@ class PhysicsInformedNN:
                  dest='./',
                  activation='elu',
                  resnet=False,
-                 optimizer=keras.optimizers.Adam(lr=5e-4),
+                 optimizer=None,
                  norm_in=None,
                  norm_out=None,
                  norm_out_type='z-score',
@@ -155,8 +156,9 @@ class PhysicsInformedNN:
         # Create save checkpoints / Load if existing previous
         self.ckpt    = tf.train.Checkpoint(step=tf.Variable(0),
                                            model=self.model,
-                                           bal_phys=self.bal_phys,
-                                           optimizer=self.optimizer)
+                                           bal_phys=self.bal_phys)
+                                           
+        
         self.manager = tf.train.CheckpointManager(self.ckpt,
                                                   self.dest + '/ckpt',
                                                   max_to_keep=5)
@@ -419,7 +421,7 @@ class PhysicsInformedNN:
         ep0     = int(self.ckpt.step)
         for ep in range(ep0, ep0+epochs):
             for ba in range(batches):
-
+                
                 # Create batches and cast to TF objects
                 (x_batch,
                  y_batch,
@@ -440,9 +442,12 @@ class PhysicsInformedNN:
                 l_phys  = tf.constant(l_phys, dtype='float32')
                 l_bc  = tf.constant(l_bc, dtype='float32')
                 ba_counter  = tf.constant(ba)
+                weights = np.concatenate(
+            [w.flatten() for w in self.model.get_weights()])            
 
                 if timer:
                     t0 = time.time()
+
                 (loss_data,
                  loss_phys,
                  loss_bc,                 
@@ -457,7 +462,8 @@ class PhysicsInformedNN:
                                                  data_mask,
                                                  bal_phys,
                                                  alpha,
-                                                 ba_counter)
+                                                 ba_counter,
+                                                 weights)
                 if timer:
                     print("Time per batch:", time.time()-t0)
                     if ba>10:
@@ -482,13 +488,14 @@ class PhysicsInformedNN:
             self.ckpt.step.assign_add(1)
             self.ckpt.bal_phys.assign(bal_phys.numpy())
             if ep%save_freq==0:
-                self.manager.save()
+                self.manager.save()                
 
-    @tf.function
+    #@tf.function    
     def _training_step(self, x_batch, y_batch,
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                      data_mask, bal_phys, alpha, ba):
-                
+                      data_mask, bal_phys, alpha,ba,weights):
+            
+        
         with tf.GradientTape(persistent=True) as tape:            
             # Data part
             output = self.model(x_batch, training=True)
@@ -506,8 +513,8 @@ class PhysicsInformedNN:
                    for ii in range(self.dout)
                    if data_mask[ii]]
             loss_data = tf.add_n(aux)        
-
-            # Physics part      
+            
+            # Physics part                              
             equations = pde(self.model, x_batch, eq_params)            
             loss_eqs  = [tf.reduce_mean(
                          lambda_phys*tf.square(eq))
@@ -523,7 +530,6 @@ class PhysicsInformedNN:
             loss_bc = tf.add_n(aux_bc)
 
             
-
             # Calculate gradients of data part
         gradients_data = tape.gradient(loss_data,
                     self.model.trainable_variables,
@@ -533,6 +539,7 @@ class PhysicsInformedNN:
         gradients_phys = tape.gradient(loss_phys,
                     self.model.trainable_variables,
                     unconnected_gradients=tf.UnconnectedGradients.ZERO)
+            
             
             # Calculate gradients of border part
         gradients_bc = tape.gradient(loss_bc,
@@ -555,7 +562,18 @@ class PhysicsInformedNN:
         # Apply gradients to the total loss function
         gradients = [g_data + bal_phys*g_phys
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
-        self.optimizer.apply_gradients(zip(gradients,
+        
+        loss = loss_bc + loss_phys + loss_data                                     
+        
+        if self.optimizer == 'lbfgs':            
+            print('FLAG')
+            loss = loss.numpy().astype('float64')
+            #loss = loss.numpy().astype('float64')
+            #grads = np.concatenate([ g.numpy().flatten() for g in grads ]).astype('float64')
+            scipy.optimize.fmin_l_bfgs_b(ybc,x0=weights,fprime = gradients,factr=1e5, maxiter=3000)
+
+        else:            
+            self.optimizer.apply_gradients(zip(gradients,
                     self.model.trainable_variables))
 
         # Save inverse constants for output
