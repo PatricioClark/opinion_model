@@ -12,7 +12,6 @@ import numpy as np
 import os
 import imageio
 
-
 #lr = keras.optimizers.schedules.ExponentialDecay(1e-4, 1000, 0.9)
 lr = 1e-7
 layers  = [2] + 3*[64] + [1]
@@ -310,7 +309,6 @@ if Euler_graph:
   plt.ylabel('$u(x,t = t_{0})$')
   plt.legend()
    
-
 plt.figure()
 plt.title('Residuales a tiempo final')
 plt.plot(x_eval_2[:,1],u_t.numpy() - u_x.numpy().reshape(100)*(2*fx_2.numpy().reshape(100) - 1),label = '$u_{t} - uf_{x}$')

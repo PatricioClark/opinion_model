@@ -564,7 +564,7 @@ class PhysicsInformedNN:
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
         
         loss = loss_bc + loss_phys + loss_data                                     
-        
+    
         if self.optimizer == 'lbfgs':            
             print('FLAG')
             loss = loss.numpy().astype('float64')

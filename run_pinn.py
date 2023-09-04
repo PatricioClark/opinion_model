@@ -1,4 +1,4 @@
-""" PINN implementation of opinion model """
+"PINN implementation of opinion model"
  
 import tensorflow as tf
 from tensorflow import keras
@@ -12,13 +12,13 @@ import time as time
 
 
 #lr = keras.optimizers.schedules.ExponentialDecay(1e-4, 1000, 0.9)
-lr = 1e-7
-layers  = [2] + 3*[64] + [1]
+lr = 1e-5
+layers  = [2] + 3*[64] + [2]
 
 PINN = PhysicsInformedNN(layers,
                          dest='./', #saque el /odir porque no hacia falta 
-                         activation='tanh', #probar con tanh 
-                         optimizer=keras.optimizers.Adam(lr),
+                         activation='tanh',
+                         optimizer='lbfgs',
                          restore=True)
 PINN.model.summary()
 
@@ -43,12 +43,13 @@ def cte_validation(self,X,u):
         print(ep,err,file=output_file)
         output_file.close()       
         
-        dx = 2/len(X)
-        fx = tf.cumsum(Y)
-        fx = fx*dx                
+        dx = 4/len(X)
+        fx = tf.cumsum(u_p)
+        fx = fx*dx     
+        Ix = tf.ones_like(u_p)*(fx[-1])           
 
         output_file_1 = open(self.dest + 'mass_conservation.dat', 'a')
-        print(ep,f'{fx.numpy()}',file=output_file_1)
+        print(ep,f'{Ix[-1].numpy()}',file=output_file_1)
         output_file_1.close()    
         
     return validation
@@ -75,21 +76,32 @@ def convolution(X):
     conv = np.convolve(u_eval,gauss,mode='same')  
     sol[i*Nx:(i+1)*Nx] = ((conv/np.max(conv))*np.max(u_eval)).reshape((len(u_eval),1))            
   return sol
+def linear(x):
+   sol = np.where((x<-1) | (x>1),0,1) * ((x+1)/2)
+   return sol.reshape(len(x),1)
 
-Lx = 2 
+Lx = 4 
 Nx = 100
-Nt = 20
+Nt = 100
 
-t = np.linspace(0,0.01,Nt)
+t = np.linspace(0,0.1,Nt)
 x = np.linspace(-2,2,Nx)
+
+
+#sigma = 0.02
+#gauss = gaussian(x,sigma)  
+#conv = np.convolve(linear(x).reshape(len(linear(x))),gauss,mode='same')  
+#cond_ini = np.tile(conv.reshape(len(conv)),Nt).reshape(Nt*len(conv),1)
+
 
 T,X = np.meshgrid(t,x)
 X = np.hstack((np.sort(T.flatten()[:,None],axis=0),X.flatten(order='F')[:,None])) #Ordeno el vector como (t,x)
 
-Y = convolution(X) #[u(t_0,x_0),u(t_1,x_1),...]
+Y = np.hstack((convolution(X), convolution(X))) #[u(t_0,x_0),u(t_1,x_1),...]
+#Y = np.hstack((cond_ini,cond_ini))
 
 lambda_data = np.zeros(Nt*Nx) #[1,0,0,..]
-lambda_data[:Nx] = 1e9
+lambda_data[:Nx] = 1e5
 
 lambda_phys = np.ones(Nt*Nx)
 lambda_phys[:Nx] = 0 #[0,1,1,..]
@@ -97,24 +109,23 @@ lambda_phys[:Nx] = 0 #[0,1,1,..]
 bc = np.zeros(Nx)
 bc[:5] = 1
 bc[-5:] = 1
-lambda_bc = np.tile(bc,Nt)*1e6
+lambda_bc = np.tile(bc,Nt)
 
-flags = np.repeat(np.arange(Nt),Nx)
+n_t_in_batch = 10 #Nt tiene que ser divisble por batches
+flags = np.repeat(np.arange(Nt/n_t_in_batch),Nx*n_t_in_batch)
 
-sigma = 0.1
 alpha = 0.0
-tot_eps = 500000
-lam =  0        #(sigma**2)/2 m
-eq_params = [Lx/Nx,lam]
-eq_params = [np.float32(p) for p in eq_params] #eq_params es el diferencial de x que paso para calcular la integral
+tot_eps = 10
+eq_params = [Lx/Nx,n_t_in_batch]
+#eq_params = [np.float32(p) for p in eq_params] 
 
-PINN.validation = cte_validation(PINN,X,convolution)
+PINN.validation = cte_validation(PINN,X,linear)
 
 t1 = time.time()
 PINN.train(X, Y, opinion_model,
            epochs=tot_eps,
-           eq_params=eq_params,
-           batch_size=Nx,
+           batch_size=n_t_in_batch*Nx,
+           eq_params=eq_params,           
            lambda_data=lambda_data,   # Punto donde se enfuerza L_bc
            lambda_phys=lambda_phys,
            lambda_bc=lambda_bc, 
@@ -122,10 +133,9 @@ PINN.train(X, Y, opinion_model,
            rnd_order_training=False,  # No arma batches al hacer
            alpha=alpha,
            verbose=False,            
-           valid_freq=100,
-           timer=False)
+           valid_freq=0,
+           timer=False,
+           data_mask=[True,False])
 
 t2 = time.time()
 print(int(t2-t1)/60)
-
-
