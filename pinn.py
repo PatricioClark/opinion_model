@@ -11,7 +11,7 @@ import numpy as np
 import tensorflow as tf
 from   tensorflow import keras
 import time
-import scipy
+import scipy.optimize
 
 tf.keras.backend.set_floatx('float32')
 
@@ -442,6 +442,7 @@ class PhysicsInformedNN:
                 l_phys  = tf.constant(l_phys, dtype='float32')
                 l_bc  = tf.constant(l_bc, dtype='float32')
                 ba_counter  = tf.constant(ba)
+                #Flatten Weights
                 weights = np.concatenate(
             [w.flatten() for w in self.model.get_weights()])            
 
@@ -488,13 +489,50 @@ class PhysicsInformedNN:
             self.ckpt.step.assign_add(1)
             self.ckpt.bal_phys.assign(bal_phys.numpy())
             if ep%save_freq==0:
-                self.manager.save()                
+                self.manager.save()     
+    def set_weights(self, flat_weights):
+        """
+        Set weights to the model.
 
-    #@tf.function    
-    def _training_step(self, x_batch, y_batch,
+        Args:
+            flat_weights: flatten weights.
+        """
+
+        # get model weights
+        shapes = [ w.shape for w in self.model.get_weights() ]
+        # compute splitting indices
+        split_ids = np.cumsum([ np.prod(shape) for shape in [0] + shapes ])
+        # reshape weights
+        weights = [ flat_weights[from_id:to_id].reshape(shape)
+            for from_id, to_id, shape in zip(split_ids[:-1], split_ids[1:], shapes) ]
+        # set weights to the model
+        self.model.set_weights(weights)
+
+    #Funcion
+    def unflatten_weights(weights, model):
+        shapes = [w.shape for w in model.get_weights()]
+        sizes = [np.prod(s) for s in shapes]
+        stops = np.cumsum(sizes)
+        starts = stops - sizes
+        arrays = [weights[start:stop].reshape(shape) for shape, start, stop in zip(shapes, starts, stops)]
+        return arrays
+    
+    #Wrapper function for fmin_l_bfgs_b
+    def loss_and_grads_wrapper(self,weights,model,x_batch, y_batch,
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                      data_mask, bal_phys, alpha,ba,weights):
-            
+                      data_mask, bal_phys,alpha):
+        
+        self.model.set_weights(self.unflatten_weights(weights, model))
+        loss, grads = self.get_loss_grads(x_batch, y_batch,
+                      pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                      data_mask, bal_phys,alpha)
+        
+        return loss.numpy().astype('float64'), grads.astype('float64')            
+
+    #Loss and gradients function    
+    def get_loss_grads(self, x_batch, y_batch,
+                      pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                      data_mask, bal_phys,alpha):
         
         with tf.GradientTape(persistent=True) as tape:            
             # Data part
@@ -528,7 +566,8 @@ class PhysicsInformedNN:
                    for ii in range(self.dout)
                    if data_mask[ii]]
             loss_bc = tf.add_n(aux_bc)
-
+            
+            loss = loss_bc + loss_phys + loss_data                                     
             
             # Calculate gradients of data part
         gradients_data = tape.gradient(loss_data,
@@ -540,7 +579,6 @@ class PhysicsInformedNN:
                     self.model.trainable_variables,
                     unconnected_gradients=tf.UnconnectedGradients.ZERO)
             
-
             # Calculate gradients of border part
         gradients_bc = tape.gradient(loss_bc,
                     self.model.trainable_variables,
@@ -562,20 +600,32 @@ class PhysicsInformedNN:
         # Apply gradients to the total loss function
         gradients = [g_data + bal_phys*g_phys
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
+            
+        return loss, gradients
+
+
+    #@tf.function    
+    def _training_step(self, x_batch, y_batch,
+                      pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                      data_mask, bal_phys, alpha,ba,weights):
+                
+        gradients = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                               data_mask, bal_phys,alpha)[1]
         
-        loss = loss_bc + loss_phys + loss_data                                     
-    
+        loss = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                               data_mask, bal_phys,alpha)[0]
+
         if self.optimizer == 'lbfgs':            
-            print('FLAG')
-            loss = loss.numpy().astype('float64')
+            print('FLAG')            
             #loss = loss.numpy().astype('float64')
             #grads = np.concatenate([ g.numpy().flatten() for g in grads ]).astype('float64')
-            scipy.optimize.fmin_l_bfgs_b(ybc,x0=weights,fprime = gradients,factr=1e5, maxiter=3000)
+            scipy.optimize.fmin_l_bfgs_b(func = self.loss_and_grads_wrapper,x0=weights,fprime = gradients,factr=1e5, maxiter=3000)
 
         else:            
             self.optimizer.apply_gradients(zip(gradients,
                     self.model.trainable_variables))
 
+        output = self.model(x_batch, training=True)
         # Save inverse constants for output
         inv_ctes = []
         if self.inverse is not None:
@@ -583,9 +633,7 @@ class PhysicsInformedNN:
                 if inv['type'] == 'const':
                     inv_ctes.append(output[ii][0])
 
-        return (loss_data,
-                loss_phys,
-                loss_bc,
+        return (loss,                
                 inv_ctes,
                 bal_phys)
 
@@ -629,7 +677,7 @@ def get_max_grad(grads):
 
 @tf.function
 def get_tr_k(grads):
-    sum_over_layers = [tf.reduce_sum(tf.square(gr)) for gr in grads]
+    sum_over_layers = [tf.reduce_sum(tf.square(gr)) for gr in grads]    
     total_sum       = tf.add_n(sum_over_layers)
     return total_sum
 
