@@ -509,7 +509,7 @@ class PhysicsInformedNN:
         self.model.set_weights(weights)
 
     #Funcion
-    def unflatten_weights(weights, model):
+    def unflatten_weights(self, weights, model):
         shapes = [w.shape for w in model.get_weights()]
         sizes = [np.prod(s) for s in shapes]
         stops = np.cumsum(sizes)
@@ -518,16 +518,25 @@ class PhysicsInformedNN:
         return arrays
     
     #Wrapper function for fmin_l_bfgs_b
-    def loss_and_grads_wrapper(self,weights,model,x_batch, y_batch,
-                      pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                      data_mask, bal_phys,alpha):
+    def loss_and_grads_wrapper(self,
+                               weights,
+                               x_batch,
+                               y_batch,
+                               pde,
+                               eq_params,
+                               lambda_data,
+                               lambda_phys,
+                               lambda_bc,
+                               data_mask,
+                               bal_phys,
+                               alpha):
         
-        self.model.set_weights(self.unflatten_weights(weights, model))
+        self.model.set_weights(self.unflatten_weights(weights, self.model))
         loss, grads = self.get_loss_grads(x_batch, y_batch,
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
                       data_mask, bal_phys,alpha)
         
-        return loss.numpy().astype('float64'), grads.astype('float64')            
+        return loss.numpy(), grads.numpy()
 
     #Loss and gradients function    
     def get_loss_grads(self, x_batch, y_batch,
@@ -601,7 +610,10 @@ class PhysicsInformedNN:
         gradients = [g_data + bal_phys*g_phys
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
             
-        return loss, gradients
+        sum_grads = [tf.reduce_sum(gg) for gg in gradients]
+        sum_grads = tf.reduce_sum(sum_grads)
+
+        return loss, sum_grads
 
 
     #@tf.function    
@@ -619,7 +631,33 @@ class PhysicsInformedNN:
             print('FLAG')            
             #loss = loss.numpy().astype('float64')
             #grads = np.concatenate([ g.numpy().flatten() for g in grads ]).astype('float64')
-            scipy.optimize.fmin_l_bfgs_b(func = self.loss_and_grads_wrapper,x0=weights,fprime = gradients,factr=1e5, maxiter=3000)
+    # def loss_and_grads_wrapper(self,
+    #                            weights,
+    #                            x_batch,
+    #                            y_batch,
+    #                            pde,
+    #                            eq_params,
+    #                            lambda_data,
+    #                            lambda_phys,
+    #                            lambda_bc,
+    #                            data_mask,
+    #                            bal_phys,
+    #                            alpha):
+            scipy.optimize.fmin_l_bfgs_b(func=self.loss_and_grads_wrapper,
+                                         args=(x_batch,
+                                               y_batch,
+                                               pde,
+                                               eq_params,
+                                               lambda_data,
+                                               lambda_phys,
+                                               lambda_bc,
+                                               data_mask,
+                                               bal_phys,
+                                               alpha),
+                                         x0=weights,
+                                         fprime=gradients,
+                                         factr=1e5,
+                                         maxiter=3000)
 
         else:            
             self.optimizer.apply_gradients(zip(gradients,
