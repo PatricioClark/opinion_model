@@ -12,6 +12,8 @@ import tensorflow as tf
 from   tensorflow import keras
 import time
 import scipy.optimize
+from tensorflow.python.ops.numpy_ops import np_config
+np_config.enable_numpy_behavior()
 
 tf.keras.backend.set_floatx('float32')
 
@@ -442,10 +444,9 @@ class PhysicsInformedNN:
                 l_phys  = tf.constant(l_phys, dtype='float32')
                 l_bc  = tf.constant(l_bc, dtype='float32')
                 ba_counter  = tf.constant(ba)
-                #Flatten Weights
+                #Flatten Weights                
                 weights = np.concatenate(
-            [w.flatten() for w in self.model.get_weights()])            
-
+            [w.flatten() for w in self.model.get_weights()])                                          
                 if timer:
                     t0 = time.time()
 
@@ -489,7 +490,8 @@ class PhysicsInformedNN:
             self.ckpt.step.assign_add(1)
             self.ckpt.bal_phys.assign(bal_phys.numpy())
             if ep%save_freq==0:
-                self.manager.save()     
+                self.manager.save()  
+
     def set_weights(self, flat_weights):
         """
         Set weights to the model.
@@ -511,16 +513,15 @@ class PhysicsInformedNN:
     #Funcion
     def unflatten_weights(self, weights, model):
         shapes = [w.shape for w in model.get_weights()]
-        sizes = [np.prod(s) for s in shapes]
-        stops = np.cumsum(sizes)
-        starts = stops - sizes
-        arrays = [weights[start:stop].reshape(shape) for shape, start, stop in zip(shapes, starts, stops)]
+        split_ids = np.cumsum([ np.prod(shape) for shape in [0] + shapes ])
+        arrays = [ weights[from_id:to_id].reshape(shape) 
+                  for from_id, to_id, shape in zip(split_ids[:-1], split_ids[1:], shapes)]
         return arrays
     
     #Wrapper function for fmin_l_bfgs_b
     def loss_and_grads_wrapper(self,
-                               weights,
-                               x_batch,
+                               weights,  
+                               x_batch,                                                            
                                y_batch,
                                pde,
                                eq_params,
@@ -530,13 +531,12 @@ class PhysicsInformedNN:
                                data_mask,
                                bal_phys,
                                alpha):
-        
-        self.model.set_weights(self.unflatten_weights(weights, self.model))
+        self.model.set_weights(self.unflatten_weights(weights,self.model))
         loss, grads = self.get_loss_grads(x_batch, y_batch,
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                      data_mask, bal_phys,alpha)
-        
-        return loss.numpy(), grads.numpy()
+                      data_mask, bal_phys,alpha)                
+        #si agrego grads.numpy() como output me tira un error que es que el output de func tiene que ser un escalar        
+        return loss.numpy()
 
     #Loss and gradients function    
     def get_loss_grads(self, x_batch, y_batch,
@@ -626,11 +626,9 @@ class PhysicsInformedNN:
         
         loss = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
                                data_mask, bal_phys,alpha)[0]
-
+        
         if self.optimizer == 'lbfgs':            
-            print('FLAG')            
-            #loss = loss.numpy().astype('float64')
-            #grads = np.concatenate([ g.numpy().flatten() for g in grads ]).astype('float64')
+                              
     # def loss_and_grads_wrapper(self,
     #                            weights,
     #                            x_batch,
@@ -642,9 +640,10 @@ class PhysicsInformedNN:
     #                            lambda_bc,
     #                            data_mask,
     #                            bal_phys,
-    #                            alpha):
+    #                            alpha):    
+            print('step 1')                        
             scipy.optimize.fmin_l_bfgs_b(func=self.loss_and_grads_wrapper,
-                                         args=(x_batch,
+                                         args=(x_batch,                                               
                                                y_batch,
                                                pde,
                                                eq_params,
@@ -655,14 +654,14 @@ class PhysicsInformedNN:
                                                bal_phys,
                                                alpha),
                                          x0=weights,
-                                         fprime=gradients,
-                                         factr=1e5,
-                                         maxiter=3000)
-
+                                         fprime=gradients.numpy(),                                        
+                                         factr=1e12,
+                                         maxiter=1)
+            
         else:            
             self.optimizer.apply_gradients(zip(gradients,
                     self.model.trainable_variables))
-
+        print('step 2')
         output = self.model(x_batch, training=True)
         # Save inverse constants for output
         inv_ctes = []
@@ -670,7 +669,7 @@ class PhysicsInformedNN:
             for ii, inv in enumerate(self.inverse, start=1):
                 if inv['type'] == 'const':
                     inv_ctes.append(output[ii][0])
-
+        
         return (loss,                
                 inv_ctes,
                 bal_phys)
