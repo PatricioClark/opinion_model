@@ -12,14 +12,15 @@ import numpy as np
 import os
 import imageio
 
+
 #lr = keras.optimizers.schedules.ExponentialDecay(1e-4, 1000, 0.9)
-lr = 1e-7
-layers  = [2] + 3*[64] + [1]
+lr = 1e-5
+layers  = [2] + 3*[64] + [2]
 
 PINN = PhysicsInformedNN(layers,
                          dest='./', #saque el /odir porque no hacia falta 
                          activation='tanh',
-                         optimizer=keras.optimizers.Adam(lr),
+                         optimizer='lbfgs',
                          restore=True)
 def gif_sol(t):  
   filenames = []
@@ -28,7 +29,7 @@ def gif_sol(t):
     solution = convolution(dom)
     pinn = PINN.model(dom)[0]
     plt.title(f'Solucion a t = {i}')
-    plt.plot(dom[:,1],pinn,label = 'PINN')
+    plt.plot(dom[:,1],pinn[:,0],label = 'PINN')
     plt.plot(dom[:,1],solution,label = 'Solucion Real')
     plt.legend()
     # create file name and append it to a list
@@ -51,7 +52,7 @@ def gif_val(t):
   for i in t:    
     dom = np.array([(i,tt) for tt in np.linspace(np.min(x),np.max(x),Nx)])
     solution = convolution(dom)
-    pinn = PINN.model(dom)[0]
+    pinn = PINN.model(dom)[0][:,0]
     validation = ((pinn-solution)**2)/np.std(solution)
     plt.title(f'Solucion a t = {i}')    
     plt.plot(dom[:,1],validation,label = 'Error')
@@ -115,10 +116,9 @@ def Euler(condicion_inicial,tiempo_final,n_pasos_temporales,espacio):
         m += 1
     return solucion
 
-
-Lx = 2 
+Lx = 4 
 Nx = 100
-Nt = 20
+Nt = 100
 
 t = np.linspace(0,0.01,Nt)
 x = np.linspace(-2,2,Nx)
@@ -135,19 +135,20 @@ sol_3D_show = False
 model_3D_show = False
 model_show = False # Solucion de la red en todo el espacio 
 sol_show = False # Solucion real en todo el espacio
-loss_val = True # Funcion de perdida + Validation
+loss_val = False # Funcion de perdida + Validation
 val = False # Validation sola
-loss = True # loss sola
+loss = False # loss sola
 cond_in = True # Condicion inicial
 x_0 = True # Miro la solucion a un tiempo t_0
-error_loc = True
+error_loc = False
 loss_eq = False
 Euler_graph = False
+resi = False
 #gif_sol(t)
 #gif_val(t)
 
 #Veo la solucion a tiempo inicial.
-t_ini = 0.0
+t_ini = t[0]
 x_eval_1 = np.array([(t_ini,tt) for tt in x])
 u_eval_1 = convolution(x_eval_1)
 fields_eval_1 = PINN.model(x_eval_1)[0]
@@ -164,7 +165,7 @@ val_local = ((u_eval_2-fields_eval_2)**2)/np.std(fields_eval_2)
 
 dx = 4/Nx
 #Integral a tiempo inicial.
-fx = tf.cumsum(fields_eval_1)
+fx = tf.cumsum(fields_eval_1[:,0])
 fx_true = tf.cumsum(u_eval_1)
 fx = fx*dx
 fx_true = fx_true*dx 
@@ -173,7 +174,7 @@ I_pinn = fx[-1]
 I_true = fx_true[-1]
 
 #Integral a tiempo final.
-fx_2 = tf.cumsum(fields_eval_2)
+fx_2 = tf.cumsum(fields_eval_2[:,0])
 fx_true_2 = tf.cumsum(u_eval_2)
 fx_2 = fx_2*dx
 fx_true_2 = fx_true_2*dx 
@@ -187,10 +188,12 @@ coords = tf.convert_to_tensor(x_eval_1)
 with tf.GradientTape(persistent=True) as tape1:
       tape1.watch(coords)           
       Yp = PINN.model(coords)[0]
-      u_p   = Yp[:,0]              
-      uf  = u_p*(2*fx - 1)                                                        
+      u_p = Yp[:,0]
+      fxp = Yp[:,1]      
+      uf  = u_p*(2*fxp - 1)  
+
 grad_u  = tape1.gradient(u_p, coords,unconnected_gradients=tf.UnconnectedGradients.ZERO)                         
-u_t = grad_u[:,0]
+u_t = grad_u[:,0] 
 u_x = grad_u[:,1]                         
 grad_uf = tape1.gradient(uf,coords,unconnected_gradients=tf.UnconnectedGradients.ZERO)           
 uf_x = grad_uf[:,1]           
@@ -201,7 +204,12 @@ f1 = uf_x
 f2 = u_t 
 
 #Evaluo el metodo de euler
-euler = Euler(u_eval_1,t_fijo,Nt,x)
+euler = Euler(u_eval_1,t[1],Nt,x)
+F = u_eval_1 * (2*fx_true - 1)
+F_pinn = fields_eval_1[:,0] * (2*fields_eval_1[:,1] - 1)
+#F_pinn = fields_eval_1[:,1]
+F = F.numpy().reshape(len(F))
+
 
 if sol_3D_show:
     fig = plt.figure(figsize = (10,10))
@@ -268,7 +276,7 @@ if val:
 if cond_in:
   plt.figure()
   plt.title('Condicion Inicial')
-  plt.plot(x_eval_1[:,1],fields_eval_1,label = 'PINN')
+  plt.plot(x_eval_1[:,1],fields_eval_1[:,0],label = 'PINN')
   plt.plot(x_eval_1[:,1],u_eval_1,label = 'Solucion Real')
   plt.xlabel('X')
   plt.ylabel('u(X)')
@@ -277,7 +285,7 @@ if cond_in:
 if x_0:
   plt.figure()
   plt.title(f'Solucion a t = {t_fijo}')  
-  plt.plot(x_eval_2[:,1],fields_eval_2, label = 'PINN')
+  plt.plot(x_eval_2[:,1],fields_eval_2[:,0], label = 'PINN')
   plt.plot(x_eval_2[:,1],u_eval_2, label = 'Solucion Real')    
   plt.xlabel('X')
   plt.ylabel('$u(x,t = t_{0})$')
@@ -301,21 +309,50 @@ if loss_eq:
   plt.legend()
 if Euler_graph:  
   plt.figure()
-  plt.title(f'Euler')  
-  plt.plot(x_eval_2[:,1],fields_eval_2, label = 'PINN')
-  plt.plot(x_eval_2[:,1],u_eval_2, label = 'Solucion Real')    
-  plt.plot(x_eval_2[:,1],euler,'o',label = 'euler')
+  plt.title(f'Euler')        
+  plt.plot(x_eval_2[:,1],f1.numpy().reshape(len(f1)), label = 'uf')    
+  plt.plot(x_eval_2[:,1],f2.numpy().reshape(len(f2)), label = 'ut')   
+  plt.plot(x_eval_2[:,1],dif_fin(x_eval_2), label = 'dif fin')     
+  #plt.plot(x_eval_2[:,1],euler, label = 'euler')
+  #plt.plot(x_eval_2[:,1],u_eval_2,'o',label = 'solucion',alpha = 0.5)     
   plt.xlabel('X')
-  plt.ylabel('$u(x,t = t_{0})$')
+  plt.ylabel('Residuales')
   plt.legend()
-   
+if resi:
+  plt.figure()
+  plt.title('Residuales a tiempo inicial')
+  plt.plot(x_eval_1[:,1],u_t.numpy() - u_x.numpy().reshape(100)*(2*fx.numpy().reshape(100) - 1),label = '$u_{t} - uf_{x}$')
+  plt.plot(x_eval_1[:,1],u_x.numpy().reshape(100)*(2*fx.numpy().reshape(100) - 1),label = '$uf_{x}$')
+  plt.plot(x_eval_1[:,1],u_t.numpy(),label = '$u_{t}$')
+  plt.legend()
+  plt.grid()       
+
+
 plt.figure()
-plt.title('Residuales a tiempo final')
-plt.plot(x_eval_2[:,1],u_t.numpy() - u_x.numpy().reshape(100)*(2*fx_2.numpy().reshape(100) - 1),label = '$u_{t} - uf_{x}$')
-plt.plot(x_eval_2[:,1],u_x.numpy().reshape(100)*(2*fx_2.numpy().reshape(100) - 1),label = '$uf_{x}$')
-plt.plot(x_eval_2[:,1],u_t.numpy(),label = '$u_{t}$')
+plt.title('F')
+plt.plot(x_eval_1[:,1],fx_true,label = 'Integral real')
+plt.plot(x_eval_1[:,1],fxp,label = 'Integral PINN')
+plt.plot(x_eval_1[:,1],F,label = 'F real')
+plt.plot(x_eval_1[:,1],F_pinn,label = 'F PINN')
+plt.legend()
+plt.grid()
+
+
+plt.figure()
+plt.title('$F_{x}$')
+plt.plot(x_eval_1[:,1][:99],f1[:99],label = 'dif F PINN')
+plt.plot(x_eval_1[:,1][:99],np.diff(F)/dx,label='dif F')
+plt.legend()
+plt.grid()
+
+
+plt.figure()
+plt.title('$u_{t}$')
+plt.plot(x_eval_1[:,1],f2,label = '$u_{t}$ PINN')
+plt.plot(x_eval_1[:,1],dif_fin(x_eval_1),label = '$u_{t}$ Real')
 plt.legend()
 plt.grid()
 
 
 plt.show()
+

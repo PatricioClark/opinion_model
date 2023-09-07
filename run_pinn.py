@@ -16,7 +16,7 @@ lr = 1e-5
 layers  = [2] + 3*[64] + [2]
 
 PINN = PhysicsInformedNN(layers,
-                         dest='./', #saque el /odir porque no hacia falta 
+                         dest='./',
                          activation='tanh',
                          optimizer='lbfgs',
                          restore=True)
@@ -84,7 +84,7 @@ Lx = 4
 Nx = 100
 Nt = 100
 
-t = np.linspace(0,0.1,Nt)
+t = np.linspace(0,0.01,Nt)
 x = np.linspace(-2,2,Nx)
 
 
@@ -111,11 +111,11 @@ bc[:5] = 1
 bc[-5:] = 1
 lambda_bc = np.tile(bc,Nt)
 
-n_t_in_batch = 10 #Nt tiene que ser divisble por batches
+n_t_in_batch = Nt #Nt tiene que ser divisble por batches
 flags = np.repeat(np.arange(Nt/n_t_in_batch),Nx*n_t_in_batch)
 
 alpha = 0.0
-tot_eps = 10
+tot_eps = 1
 eq_params = [Lx/Nx,n_t_in_batch]
 #eq_params = [np.float32(p) for p in eq_params] 
 
