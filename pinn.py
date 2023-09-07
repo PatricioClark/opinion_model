@@ -536,7 +536,7 @@ class PhysicsInformedNN:
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
                       data_mask, bal_phys,alpha)                
         #si agrego grads.numpy() como output me tira un error que es que el output de func tiene que ser un escalar        
-        return loss.numpy()
+        return loss.numpy(), grads
 
     #Loss and gradients function    
     def get_loss_grads(self, x_batch, y_batch,
@@ -609,11 +609,9 @@ class PhysicsInformedNN:
         # Apply gradients to the total loss function
         gradients = [g_data + bal_phys*g_phys
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
-            
-        sum_grads = [tf.reduce_sum(gg) for gg in gradients]
-        sum_grads = tf.reduce_sum(sum_grads)
+        grads = np.concatenate([gg.numpy().flatten() for gg in gradients]).astype('float64')
 
-        return loss, sum_grads
+        return loss, grads
 
 
     #@tf.function    
@@ -642,21 +640,22 @@ class PhysicsInformedNN:
     #                            bal_phys,
     #                            alpha):    
             print('step 1')                        
-            scipy.optimize.fmin_l_bfgs_b(func=self.loss_and_grads_wrapper,
-                                         args=(x_batch,                                               
-                                               y_batch,
-                                               pde,
-                                               eq_params,
-                                               lambda_data,
-                                               lambda_phys,
-                                               lambda_bc,
-                                               data_mask,
-                                               bal_phys,
-                                               alpha),
-                                         x0=weights,
-                                         fprime=gradients.numpy(),                                        
-                                         factr=1e12,
-                                         maxiter=1)
+            scipy.optimize.minimize(fun=self.loss_and_grads_wrapper,
+                                    args=(x_batch,                                               
+                                          y_batch,
+                                          pde,
+                                          eq_params,
+                                          lambda_data,
+                                          lambda_phys,
+                                          lambda_bc,
+                                          data_mask,
+                                          bal_phys,
+                                          alpha),
+                                    x0=weights,
+                                    method='L-BFGS-B',
+                                    jac=True)
+                                    # factr=1e12,
+                                    # maxiter=1)
             
         else:            
             self.optimizer.apply_gradients(zip(gradients,
