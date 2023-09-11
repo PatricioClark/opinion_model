@@ -536,7 +536,10 @@ class PhysicsInformedNN:
         self.model.set_weights(self.unflatten_weights(weights,self.model))
         loss, grads = self.get_loss_grads(x_batch, y_batch,
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                      data_mask, bal_phys,alpha)                                               
+                      data_mask, bal_phys,alpha)  
+        
+        grads = np.concatenate([ g.numpy().flatten() for g in grads ]).astype('float64')                    
+
         return  loss.numpy(),grads
 
     #Loss and gradients function    
@@ -610,9 +613,7 @@ class PhysicsInformedNN:
         # Apply gradients to the total loss function
         gradients = [g_data + bal_phys*g_phys
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
-        
-        gradients = np.concatenate([ g.numpy().flatten() for g in gradients ]).astype('float64')                    
-        
+                        
         return loss, gradients
 
 
@@ -655,9 +656,20 @@ class PhysicsInformedNN:
                                     x0=weights,
                                     method='L-BFGS-B',
                                     jac=True,
-                                    options={'disp':True})
+                                    options={'disp':True,'maxiter':10000})
             
         else:            
+            gradients = self.get_loss_grads(x_batch,
+                                            y_batch,                                            
+                                            pde, 
+                                            eq_params,
+                                            lambda_data,
+                                            lambda_phys,
+                                            lambda_bc,                            
+                                            data_mask, 
+                                            bal_phys,
+                                            alpha)[1]
+            
             self.optimizer.apply_gradients(zip(gradients,
                     self.model.trainable_variables))
         

@@ -18,7 +18,8 @@ layers  = [2] + 3*[64] + [2]
 PINN = PhysicsInformedNN(layers,
                          dest='./',
                          activation='tanh',
-                         optimizer='lbfgs',
+                         optimizer=keras.optimizers.Adam(lr),
+                         #optimizer='lbfgs',
                          restore=True)
 PINN.model.summary()
 
@@ -82,9 +83,9 @@ def linear(x):
 
 Lx = 4 
 Nx = 100
-Nt = 100
+Nt = 300
 
-t = np.linspace(0,0.01,Nt)
+t = np.linspace(0,0.03,Nt)
 x = np.linspace(-2,2,Nx)
 
 
@@ -101,7 +102,7 @@ Y = np.hstack((convolution(X), convolution(X))) #[u(t_0,x_0),u(t_1,x_1),...]
 #Y = np.hstack((cond_ini,cond_ini))
 
 lambda_data = np.zeros(Nt*Nx) #[1,0,0,..]
-lambda_data[:Nx] = 1e5
+lambda_data[:Nx] = 1
 
 lambda_phys = np.ones(Nt*Nx)
 lambda_phys[:Nx] = 0 #[0,1,1,..]
@@ -115,11 +116,11 @@ n_t_in_batch = Nt #Nt tiene que ser divisble por batches
 flags = np.repeat(np.arange(Nt/n_t_in_batch),Nx*n_t_in_batch)
 
 alpha = 0.0
-tot_eps = 1
+tot_eps = 200000
 eq_params = [Lx/Nx,n_t_in_batch]
 #eq_params = [np.float32(p) for p in eq_params] 
 
-PINN.validation = cte_validation(PINN,X,linear)
+PINN.validation = cte_validation(PINN,X,convolution)
 
 t1 = time.time()
 PINN.train(X, Y, opinion_model,
