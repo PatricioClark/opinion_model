@@ -734,6 +734,11 @@ def get_mini_batch(X, Y, ld, lf, lbc, ba, batch_size, flag_idxs, random=True):
     idxs = flag_idxs[ba]
     return X[idxs], Y[idxs], ld[idxs], lf[idxs], lbc[idxs]
 
+
+
+
+
+
 class AdaptiveAct(keras.layers.Layer):
     """ Adaptive activation function """
     def __init__(self, activation=keras.activations.tanh, **kwargs):
