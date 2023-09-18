@@ -449,10 +449,9 @@ class PhysicsInformedNN:
                 if timer:
                     t0 = time.time()
                 
-                #(loss_data,
-                # loss_phys,
-                # loss_bc,         
-                (loss,        
+                (loss_data,
+                 loss_phys,
+                 loss_bc,                                 
                  inv_outputs,
                  bal_phys) = self._training_step(x_batch,
                                                  y_batch,
@@ -475,9 +474,9 @@ class PhysicsInformedNN:
             # Print status
             if ep%print_freq==0:
                 self._print_status(ep,
-                                  l_data,
-                                  l_phys,
-                                  l_bc,
+                                  loss_data,
+                                  loss_phys,
+                                  loss_bc,
                                   inv_outputs,
                                   alpha,
                                   verbose=verbose)
@@ -534,9 +533,13 @@ class PhysicsInformedNN:
                                alpha):
         
         self.model.set_weights(self.unflatten_weights(weights,self.model))
-        loss, grads = self.get_loss_grads(x_batch, y_batch,
+        loss = self.get_loss_grads(x_batch, y_batch,
                       pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                      data_mask, bal_phys,alpha)  
+                      data_mask, bal_phys,alpha)[0]
+
+        grads =  self.get_loss_grads(x_batch, y_batch,
+                      pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                      data_mask, bal_phys,alpha)[4]
         
         grads = np.concatenate([ g.numpy().flatten() for g in grads ]).astype('float64')                    
 
@@ -614,7 +617,7 @@ class PhysicsInformedNN:
         gradients = [g_data + bal_phys*g_phys
                      for g_data, g_phys in zip(gradients_data, gradients_phys)]
                         
-        return loss, gradients
+        return loss,loss_data,loss_phys,loss_bc, gradients
 
 
     #@tf.function    
@@ -623,10 +626,19 @@ class PhysicsInformedNN:
                       data_mask, bal_phys, alpha,ba,weights):
                 
         gradients = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
-                               data_mask, bal_phys,alpha)[1]
+                               data_mask, bal_phys,alpha)[4]
         
         loss = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
                                data_mask, bal_phys,alpha)[0]
+        
+        loss_data = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                               data_mask, bal_phys,alpha)[1]
+        
+        loss_phys = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                               data_mask, bal_phys,alpha)[2]
+        
+        loss_bc = self.get_loss_grads(x_batch, y_batch,pde, eq_params, lambda_data, lambda_phys, lambda_bc,
+                               data_mask, bal_phys,alpha)[3]
         
         if self.optimizer == 'lbfgs':            
                               
@@ -656,7 +668,7 @@ class PhysicsInformedNN:
                                     x0=weights,
                                     method='L-BFGS-B',
                                     jac=True,
-                                    options={'disp':True,'maxiter':10000})
+                                    options={'disp':True})
             
         else:            
             gradients = self.get_loss_grads(x_batch,
@@ -668,7 +680,7 @@ class PhysicsInformedNN:
                                             lambda_bc,                            
                                             data_mask, 
                                             bal_phys,
-                                            alpha)[1]
+                                            alpha)[4]
             
             self.optimizer.apply_gradients(zip(gradients,
                     self.model.trainable_variables))
@@ -681,7 +693,9 @@ class PhysicsInformedNN:
                 if inv['type'] == 'const':
                     inv_ctes.append(output[ii][0])
         
-        return (loss,                
+        return (loss_data,
+                loss_phys,
+                loss_bc,                
                 inv_ctes,
                 bal_phys)
 
@@ -733,11 +747,6 @@ def get_mini_batch(X, Y, ld, lf, lbc, ba, batch_size, flag_idxs, random=True):
     ''' New separted version for this problem '''
     idxs = flag_idxs[ba]
     return X[idxs], Y[idxs], ld[idxs], lf[idxs], lbc[idxs]
-
-
-
-
-
 
 class AdaptiveAct(keras.layers.Layer):
     """ Adaptive activation function """

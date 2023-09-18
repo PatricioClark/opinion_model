@@ -83,9 +83,9 @@ def linear(x):
 
 Lx = 4 
 Nx = 100
-Nt = 300
+Nt = 500
 
-t = np.linspace(0,0.03,Nt)
+t = np.linspace(0,0.05,Nt)
 x = np.linspace(-2,2,Nx)
 
 
@@ -102,7 +102,7 @@ Y = np.hstack((convolution(X), convolution(X))) #[u(t_0,x_0),u(t_1,x_1),...]
 #Y = np.hstack((cond_ini,cond_ini))
 
 lambda_data = np.zeros(Nt*Nx) #[1,0,0,..]
-lambda_data[:Nx] = 1
+lambda_data[:Nx] = 1e6
 
 lambda_phys = np.ones(Nt*Nx)
 lambda_phys[:Nx] = 0 #[0,1,1,..]

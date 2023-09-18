@@ -14,7 +14,7 @@ import imageio
 
 
 #lr = keras.optimizers.schedules.ExponentialDecay(1e-4, 1000, 0.9)
-lr = 1e-5
+#lr = 1e-5
 layers  = [2] + 3*[64] + [2]
 
 PINN = PhysicsInformedNN(layers,
