@@ -506,8 +506,7 @@ class PhysicsInformedNN:
         # reshape weights
         weights = [ flat_weights[from_id:to_id].reshape(shape)
             for from_id, to_id, shape in zip(split_ids[:-1], split_ids[1:], shapes) ]
-        # set weights to the model
-        print('set_weight')
+        # set weights to the model        
         self.model.set_weights(weights)
 
     #Funcion
