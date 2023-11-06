@@ -2,7 +2,13 @@ import tensorflow as tf
 tf.keras.backend.set_floatx('float32')
 #import numpy as np        
             
-        
+@tf.function        
+def tf_reduceat(data, at_array, axis=0):
+    split_data_1 = tf.split(data/2, at_array, axis=axis)
+    split_data = tf.concat([split_data_1[i] + split_data_1[i-1] for i in range(1,len(split_data_1))],axis = 0)    
+    return tf.concat([tf.expand_dims(split_data[0],axis=0), split_data],axis = 0) 
+
+
 @tf.function
 def opinion_model(model, coords, params):
     """ Opinion model
@@ -17,14 +23,10 @@ def opinion_model(model, coords, params):
     X_split_diff = [tf.concat([tf.expand_dims(X_diff[i][0],axis=0), X_diff[i]],axis = 0) for i in range(len(X_diff))]
 
     Y_split = tf.split(Yp[:,0],params[1],axis=0)
-    split_element = tf.split(Y_split[0],len(Y_split[0]))
-    trapezoid = tf.concat([split_element[i] + split_element[i-1] for i in range(1,len(split_element))],axis = 0)
-    trapezoid2 = tf.concat([tf.expand_dims(trapezoid[0],axis=0), trapezoid],axis = 0) 
-    trapezoid_concat = tf.tile(trapezoid2,[params[1]])/2
-    trapezoid_split = tf.split(trapezoid_concat,params[1])
+    trapezoid = [tf_reduceat(Y_split[i],len(Y_split[i])) for i in range(len(Y_split))]
 
-
-    s2 = tf.multiply(trapezoid_split,X_split_diff)    
+    s1 = tf.multiply(trapezoid,X_split_diff)    
+    s2 = tf.cumsum(s1,axis=1)
     l = [s2[i] for i in range(len(s2))]    
     Fx =  tf.concat(l,axis = 0)
     Ix_batch = [s2[i][-1] for i in range(len(s2))]    

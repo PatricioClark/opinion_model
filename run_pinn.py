@@ -9,10 +9,13 @@ from pinn      import PhysicsInformedNN
 from equations import opinion_model 
 import numpy as np
 import time as time
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
+
 
 
 #lr = keras.optimizers.schedules.ExponentialDecay(1e-4, 1000, 0.9)
-lr = 1e-5
+lr = 1e-4
 layers  = [2] + 3*[64] + [2]
 
 PINN = PhysicsInformedNN(layers,
@@ -54,7 +57,7 @@ def cte_validation(self,X,u):
         output_file_1.close()    
         
     return validation
-def gaussian( x , s):
+def gaussian( x , s):    
     return 1./np.sqrt( 2. * np.pi * s**2 ) * np.exp( -x**2 / ( 2. * s**2 ) )
 def solution(X):  
   sol = np.zeros(len(X))
@@ -66,20 +69,46 @@ def solution(X):
     sol[i] = np.where((x<lower) | (x>uper),0,1) * 1/(2-2*t_0) 
   return sol.reshape((len(X),1))
 def convolution(X):
-  s = 0.1
   t = len(np.unique(X[:,0]))  
   Nx = int(len(X)/t)  
   sol = np.zeros((Nx*t,1))
   for i in range(t):
     x_eval = X[i*Nx:(i+1)*Nx]          
     u_eval = solution(x_eval).reshape(-1)        
-    gauss = gaussian(x_eval[:,1],s)  
+    gauss = gaussian(x_eval[:,1],0.05)  
     conv = np.convolve(u_eval,gauss,mode='same')  
     sol[i*Nx:(i+1)*Nx] = ((conv/np.max(conv))*np.max(u_eval)).reshape((len(u_eval),1))            
   return sol
 def linear(x):
    sol = np.where((x<-1) | (x>1),0,1) * ((x+1)/2)
    return sol.reshape(len(x),1)
+def dif_fin(x):   
+   dx = (x[:,1][1] - x[:,1][0])
+   u = convolution(x).reshape(len(x[:,1]))
+   u[1] = u[0]
+   u[-2] = u[-1]
+   f = np.cumsum(u)*dx
+   F = u*(2*f - 1)      
+   return np.gradient(F, dx).reshape(len(x[:,1]),1)
+def collocation_distribution(x,s,peaks):    
+    g = 0
+    for i in range(len(peaks)):
+      g += 1./np.sqrt( 2. * np.pi * s**2 ) * np.exp( -(x - peaks[i])**2 / ( 2. * s**2 ) )            
+    return g
+def domain(t,x,N):      
+   t_0 = t[0]
+   x_0 = np.array([(t_0,tt) for tt in x])
+   u_t = np.abs(dif_fin(x_0))
+   peaks_pos = find_peaks(u_t.reshape(len(u_t)),prominence=1.5)
+   peak_location = [x[i] for i in peaks_pos[0]]   
+   dist = collocation_distribution(x_0[:,1],0.2,peak_location)   
+   uniform_samples = np.random.uniform(0,1,N)
+   cdf = np.cumsum(dist)   
+   collocation_points = np.interp(uniform_samples, cdf / cdf[-1], x)      
+   x1 = np.linspace(x[0],x[-1],100 - N)
+   domain = np.concatenate([x1,collocation_points])   
+   return domain
+   
 
 Lx = 4 
 Nx = 100
@@ -88,21 +117,15 @@ Nt = 500
 t = np.linspace(0,0.05,Nt)
 x = np.linspace(-2,2,Nx)
 
+space = np.sort(domain(t,x,40))
 
-#sigma = 0.02
-#gauss = gaussian(x,sigma)  
-#conv = np.convolve(linear(x).reshape(len(linear(x))),gauss,mode='same')  
-#cond_ini = np.tile(conv.reshape(len(conv)),Nt).reshape(Nt*len(conv),1)
-
-
-T,X = np.meshgrid(t,x)
+T,X = np.meshgrid(t,space)
 X = np.hstack((np.sort(T.flatten()[:,None],axis=0),X.flatten(order='F')[:,None])) #Ordeno el vector como (t,x)
 
 Y = np.hstack((convolution(X), convolution(X))) #[u(t_0,x_0),u(t_1,x_1),...]
-#Y = np.hstack((cond_ini,cond_ini))
 
 lambda_data = np.zeros(Nt*Nx) #[1,0,0,..]
-lambda_data[:Nx] = 1e6
+lambda_data[:Nx] = 1e5
 
 lambda_phys = np.ones(Nt*Nx)
 lambda_phys[:Nx] = 0 #[0,1,1,..]
@@ -116,7 +139,7 @@ n_t_in_batch = Nt #Nt tiene que ser divisble por batches
 flags = np.repeat(np.arange(Nt/n_t_in_batch),Nx*n_t_in_batch)
 
 alpha = 0.0
-tot_eps = 200000
+tot_eps = 100000
 eq_params = [Lx/Nx,n_t_in_batch]
 #eq_params = [np.float32(p) for p in eq_params] 
 
@@ -134,7 +157,7 @@ PINN.train(X, Y, opinion_model,
            rnd_order_training=False,  # No arma batches al hacer
            alpha=alpha,
            verbose=False,            
-           valid_freq=0,
+           valid_freq=5000,
            timer=False,
            data_mask=[True,False])
 

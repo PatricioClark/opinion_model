@@ -11,18 +11,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import imageio
+from scipy.signal import find_peaks
 
 
 #lr = keras.optimizers.schedules.ExponentialDecay(1e-4, 1000, 0.9)
-#lr = 1e-5
+lr = 1e-4
 layers  = [2] + 3*[64] + [2]
 
 PINN = PhysicsInformedNN(layers,
                          dest='./', #saque el /odir porque no hacia falta 
                          activation='tanh',
-                         optimizer='lbfgs',
+                         optimizer=keras.optimizers.Adam(lr),
+                         #optimizer='lbfgs',
                          restore=True)
-def gif_sol(t):  
+def gif_sol(t):   
   filenames = []
   for i in t:    
     dom = np.array([(i,tt) for tt in np.linspace(np.min(x),np.max(x),Nx)])
@@ -31,6 +33,7 @@ def gif_sol(t):
     plt.title(f'Solucion a t = {i}')
     plt.plot(dom[:,1],pinn[:,0],label = 'PINN')
     plt.plot(dom[:,1],solution,label = 'Solucion Real')
+    plt.grid()
     plt.legend()
     # create file name and append it to a list
     filename = f'{i}.png'    
@@ -115,15 +118,46 @@ def Euler(condicion_inicial,tiempo_final,n_pasos_temporales,espacio):
         solucion += h*F
         m += 1
     return solucion
+def collocation_distribution(x,s,peaks):    
+    g = 0
+    for i in range(len(peaks)):
+      g += 1./np.sqrt( 2. * np.pi * s**2 ) * np.exp( -(x - peaks[i])**2 / ( 2. * s**2 ) )            
+    return g
+def domain(t,x,N):      
+   t_0 = t[0]
+   x_0 = np.array([(t_0,tt) for tt in x])
+   u_t = np.abs(dif_fin(x_0))
+   peaks_pos = find_peaks(u_t.reshape(len(u_t)),prominence=1.5)
+   peak_location = [x[i] for i in peaks_pos[0]]   
+   dist = collocation_distribution(x_0[:,1],0.2,peak_location)   
+   uniform_samples = np.random.uniform(0,1,N)
+   cdf = np.cumsum(dist)   
+   collocation_points = np.interp(uniform_samples, cdf / cdf[-1], x)      
+   x1 = np.linspace(x[0],x[-1],len(x) - N)
+   domain = np.concatenate([x1,collocation_points])   
+   return domain
+def dif_fin_2(x):
+   diff = np.diff(x[:,1])
+   dx = np.append(diff[0],diff)
+   u = convolution(x).reshape(len(x[:,1]))
+   u[1] = u[0]
+   u[-2] = u[-1]
+   trap = np.array([u[i] + u[i-1] for i in range(1,len(u))])
+   trap_append =  np.append(trap[0],trap) 
+   f = np.cumsum(trap_append)*dx
+   F = u*(2*f - 1)      
+   return np.gradient(F, dx).reshape(len(x[:,1]),1)
 
 Lx = 4 
-Nx = 100
-Nt = 100
+Nx = 200
+Nt = 500
 
-t = np.linspace(0,0.01,Nt)
+t = np.linspace(0,0.05,Nt)
 x = np.linspace(-2,2,Nx)
 
-T,X = np.meshgrid(t,x)
+space = np.sort(domain(t,x,50))
+
+T,X = np.meshgrid(t,space)
 X = np.hstack((np.sort(T.flatten()[:,None],axis=0),X.flatten(order='F')[:,None])) #Ordeno el vector como (t,x)
 
 #Solucion real y solucion de la rex
@@ -137,7 +171,7 @@ model_show = False # Solucion de la red en todo el espacio
 sol_show = False # Solucion real en todo el espacio
 loss_val = False # Funcion de perdida + Validation
 val = False # Validation sola
-loss = False # loss sola
+loss = True # loss sola
 cond_in = True # Condicion inicial
 x_0 = True # Miro la solucion a un tiempo t_0
 error_loc = False
@@ -149,13 +183,16 @@ resi = False
 
 #Veo la solucion a tiempo inicial.
 t_ini = t[0]
-x_eval_1 = np.array([(t_ini,tt) for tt in x])
-u_eval_1 = convolution(x_eval_1)
+x_eval_1 = np.array([(t_ini,tt) for tt in space])
+x_eval_1_test = np.array([(t_ini,tt) for tt in x])
+u_eval_1 = solution(x_eval_1)
+u_eval_1_test = solution(x_eval_1_test)
 fields_eval_1 = PINN.model(x_eval_1)[0]
+
 
 ##Veo la solucion a tiempo final.
 t_fijo = t[-1]
-x_eval_2 = np.array([(t_fijo,tt) for tt in x])
+x_eval_2 = np.array([(t_fijo,tt) for tt in space])
 u_eval_2 = convolution(x_eval_2)
 fields_eval_2 = PINN.model(x_eval_2)[0]
 
@@ -204,7 +241,7 @@ f1 = uf_x
 f2 = u_t 
 
 #Evaluo el metodo de euler
-euler = Euler(u_eval_1,t[1],Nt,x)
+euler = Euler(u_eval_1,t[1],Nt,space)
 F = u_eval_1 * (2*fx_true - 1)
 F_pinn = fields_eval_1[:,0] * (2*fields_eval_1[:,1] - 1)
 #F_pinn = fields_eval_1[:,1]
@@ -330,6 +367,7 @@ if resi:
 
 plt.figure()
 plt.title('F')
+plt.plot(x_eval_1[:,1],np.zeros(Nx),'o',alpha= 0.4,label = 'Collocation points')    
 plt.plot(x_eval_1[:,1],fx_true,label = 'Integral real')
 plt.plot(x_eval_1[:,1],fxp,label = 'Integral PINN')
 plt.plot(x_eval_1[:,1],F,label = 'F real')
@@ -340,8 +378,8 @@ plt.grid()
 
 plt.figure()
 plt.title('$F_{x}$')
-plt.plot(x_eval_1[:,1][:99],f1[:99],label = 'dif F PINN')
-plt.plot(x_eval_1[:,1][:99],np.diff(F)/dx,label='dif F')
+plt.plot(x_eval_1[:,1][:len(space)-1],f1[:len(space)-1],label = 'dif F PINN')
+plt.plot(x_eval_1[:,1][:len(space)-1],np.diff(F)/dx,label='dif F')
 plt.legend()
 plt.grid()
 
@@ -353,6 +391,17 @@ plt.plot(x_eval_1[:,1],dif_fin(x_eval_1),label = '$u_{t}$ Real')
 plt.legend()
 plt.grid()
 
+
+
+plt.figure()
+plt.title('Residuales')
+plt.plot(x_eval_1[:,1],f2,'o',label = '$u_{t}$ PINN')
+plt.plot(x_eval_1[:,1],f1,label = '$F_{x}$ PINN')
+plt.plot(x_eval_1[:,1],f1 - f2,label = 'Residuos')
+plt.xlabel('X')
+plt.ylabel('$u_{t} - F_{x}$')
+plt.grid()
+plt.legend()
 
 plt.show()
 
