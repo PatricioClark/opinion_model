@@ -95,21 +95,22 @@ def collocation_distribution(x,s,peaks):
     for i in range(len(peaks)):
       g += 1./np.sqrt( 2. * np.pi * s**2 ) * np.exp( -(x - peaks[i])**2 / ( 2. * s**2 ) )            
     return g
-def domain(t,x,N):      
-   t_0 = t[0]
+def domain(t,x,N,N_extra):      
+   t_0 = t[1]
    x_0 = np.array([(t_0,tt) for tt in x])
    u_t = np.abs(dif_fin(x_0))
    peaks_pos = find_peaks(u_t.reshape(len(u_t)),prominence=1.5)
    peak_location = [x[i] for i in peaks_pos[0]]   
    dist = collocation_distribution(x_0[:,1],0.2,peak_location)   
-   uniform_samples = np.random.uniform(0,1,N)
+   uniform_samples = np.random.uniform(0,1,N_extra)
    cdf = np.cumsum(dist)   
    collocation_points = np.interp(uniform_samples, cdf / cdf[-1], x)      
-   x1 = np.linspace(x[0],x[-1],100 - N)
-   domain = np.concatenate([x1,collocation_points])   
-   return domain
+   x1 = np.linspace(-2,2,N-N_extra)
+   x_extra = np.concatenate([x1,collocation_points])   
+   T1,X1 = np.meshgrid(t[1:],np.sort(x_extra))
+   X = np.hstack((np.sort(T1.flatten()[:,None],axis=0),X1.flatten(order='F')[:,None])) 
+   return X
    
-
 Lx = 4 
 Nx = 100
 Nt = 500
@@ -117,17 +118,15 @@ Nt = 500
 t = np.linspace(0,0.05,Nt)
 x = np.linspace(-2,2,Nx)
 
-space = np.sort(domain(t,x,40))
-
-T,X = np.meshgrid(t,space)
+T,X = np.meshgrid(t[0],x)
 X = np.hstack((np.sort(T.flatten()[:,None],axis=0),X.flatten(order='F')[:,None])) #Ordeno el vector como (t,x)
 
 Y = np.hstack((convolution(X), convolution(X))) #[u(t_0,x_0),u(t_1,x_1),...]
 
-lambda_data = np.zeros(Nt*Nx) #[1,0,0,..]
+lambda_data = np.zeros(Nx) #[1,0,0,..]
 lambda_data[:Nx] = 1e5
 
-lambda_phys = np.ones(Nt*Nx)
+lambda_phys = np.ones(Nx)
 lambda_phys[:Nx] = 0 #[0,1,1,..]
 
 bc = np.zeros(Nx)
@@ -135,18 +134,32 @@ bc[:5] = 1
 bc[-5:] = 1
 lambda_bc = np.tile(bc,Nt)
 
+Nx_extra = 40
+x2 = np.linspace(-2,2,Nx-Nx_extra)
+
+X_extra = domain(t,x,Nx,Nx_extra)
+Y_extra = np.hstack((convolution(X_extra), convolution(X_extra)))
+
+lambda_phys_extra = np.ones(len(X_extra))
+lambda_data_extra  = np.zeros(len(X_extra))
+
+X_total = np.concatenate([X,X_extra])
+Y_total = np.concatenate([Y,Y_extra])
+lambda_data = np.concatenate([lambda_data,lambda_data_extra])
+lambda_phys = np.concatenate([lambda_phys,lambda_phys_extra])
+
 n_t_in_batch = Nt #Nt tiene que ser divisble por batches
 flags = np.repeat(np.arange(Nt/n_t_in_batch),Nx*n_t_in_batch)
 
 alpha = 0.0
-tot_eps = 100000
+tot_eps = 10000
 eq_params = [Lx/Nx,n_t_in_batch]
 #eq_params = [np.float32(p) for p in eq_params] 
 
 PINN.validation = cte_validation(PINN,X,convolution)
 
 t1 = time.time()
-PINN.train(X, Y, opinion_model,
+PINN.train(X_total, Y_total, opinion_model,
            epochs=tot_eps,
            batch_size=n_t_in_batch*Nx,
            eq_params=eq_params,           
